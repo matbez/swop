@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Program Server
 do wymiany danych medycznych z uzyciem standardu HL7
@@ -5,125 +6,166 @@ w ramach projektu SWOP
 oraz pracy inzynierskiej
 Mateusz Bezkorowajny
 '''
-import gevent
 from gevent.server import StreamServer
 from gevent.pool import Pool
 import hl7
+from pymongo.connection import Connection
+from pymongo import ASCENDING
+import json
 
-pacjent = None
-global n
-n = 0
-komunikat1 = 'Wybierz pacjenta, ktorego dane chcesz otrzymac:'
-komunikat2 = 'Dane zostaly wyslane'
+#-------------------------------------------------Zmienne Globalne-----------------------------------------------#
 menu = '''\n
     Dostepne opcje:\n
-    0 - Wyjscie\n
+    9 - Wyjscie\n
     1 - Dodaj dane pacjenta\n
     2 - Pobierz dane pacjenta\n
     3 - Pokaz liste pacjentow\n
     
+    Zatwierdzenie danych do wyslania odbywa sie poprzez wyslanie pustej linii.
+    
     Twoj wybor to: '''
+    
+identyfikator = []
+licznik = []
 
-#obsluga polaczenia
+#----------------------------------------------------Parsowanie--------------------------------------------------#
+def parsowanie(dane, licznik):
+    sparsowane = hl7.parse(dane)
+    msh = hl7.segment('MSH', sparsowane) #w takiej postaci
+    pid = hl7.segment('PID', sparsowane) #ale na szczescie tylko te, ktore beda uzyteczne z punktu widzenia projektu
+    obr = hl7.segment('OBR', sparsowane)
+    obx = hl7.segment('OBX', sparsowane)
+    nk1 = hl7.segment('NK1', sparsowane)
+    pv1 = hl7.segment('PV1', sparsowane)
+    #tu bedzie jeszcze 120 innych...
+    #a potem odwolanie do funkcji zapisujacej to do bazy danych
+    
+    #wybiorcze sprawdzenie czy wszystko dziala:
+    print sparsowane
+    print
+    print nk1
+    print pid
+    
+    pacjent = {"MSH: ": msh, #tu beda tylko te pola, ktore przydadza sie z punktu widzenia projektu.
+               "PID: ": pid, #Ew. do bazy zostana wyslane juz tylko istotne dane wyciagniete z parsera
+               "OBR: ": obr, #pewnie okaze sie jak dostane i ogarne standardy
+               "OBX: ": obx,
+               "NK1: ": nk1,
+               "PV1: ": pv1}
+    dodaj_do_bazy(pacjent, licznik)
+
+#-----------------------------------------------Dodawanie do Bazy-------------------------------------------------#
+def dodaj_do_bazy(pacjent, liczik):
+    dodaj  = db.pacjenci
+    identyfikator[licznik] = dodaj.put(pacjent)
+
+#-----------------------------------------------Wypisywanie z Bazy------------------------------------------------#
+def wypisz_z_bazy():
+    cursor = db.pacjenci.find()
+    j=db.pacjenci.count()
+    lista=None
+    i = 0
+    while i <= j :
+        lista = cursor[i]
+        print lista
+        i=i+1
+    print lista
+    
+    return(lista)
+    #db.pacjenci.find({"$oid":licznik[numer]}) - wyszukiwanie jednego pacjenta?
+    
+#-----------------------------------------------Wprowadzanie danych-----------------------------------------------#
+def wprowadz_dane():
+    n='0'
+    dane=raw_input() + '\r'
+    while True:
+        n = raw_input() + '\r'
+        if n == '\r':
+            return(dane)
+        else:
+            dane+= n
+#----------------------------------------------Wysylanie danych---------------------------------------------------#     
+def wyslij_dane(socket, dane):
+    dlugosc=str(len(dane))
+    socket.send(dlugosc)
+    ack=socket.recv(3)
+    ack = int(ack)
+    if ack == 1:
+        socket.send(dane)
+    else:
+        print "Mamy problem - klient nie odpowiada na wiadomosc o dlugosci danych!"
+#-----------------------------------------------Odbieranie danych--------------------------------------------------#        
+def odbierz_dane(socket):
+    rozmiar = int(socket.recv(1024))
+    if rozmiar != 0:
+        socket.send("1")
+        dane = socket.recv(rozmiar)
+        return(dane)
+    else:
+        socket.send("0")
+        print "Problem z odbiorem danych!"
+#-----------------------------------------------Obsluga polaczenia-------------------------------------------------#
 def obsluga(socket, address):
     print ('Nowe polaczenie z %s:%s' % address)
+    dane = menu
     while True:
         try:
-          socket.send(menu)
-          co_robimy = int(socket.recv(1024))
+            wyslij_dane(socket, dane)
+            co_robimy = int(odbierz_dane(socket))
+            print co_robimy
         except:
             print "Nie udalo sie skomunikowac z klientem" 
         if not co_robimy:
             print ("klient zostal rozlaczony\n")
             break
-        if co_robimy == 0:
+        if co_robimy == 9:
             try:
-                socket.send("Zakonczyles polaczenie z serwerem\n")
-                socket.send(None)
+                komunikat_rozlacz = "Zakonczyles polaczenie z serwerem\n"
+                wyslij_dane(socket, komunikat_rozlacz)
                 print ("klient sie rozlaczyl\n")
             except:
                 print "nie udalo sie rozlaczyc!"
-                socket.send("Nie udalo sie rozlaczyc.")
+                komunikat_rozlacz_err = "Nie udalo sie rozlaczyc."
+                wyslij_dane(socket, komunikat_rozlacz_err)
                 continue
             break
         if co_robimy == 1:
             try:
-              socket.send('Podaj dane do wyslania\n')
-              dane = ''
-              dane += socket.recv(4096)#nie wiem jakie duze beda te dane
+                licznik = licznik + 1
+                komunikat_dodaj_1 = "Wprowadz dane pacjenta: "
+                wyslij_dane(socket, komunikat_dodaj_1)
+                pacjent = odbierz_dane(socket)
+                try:
+                    parsowanie(pacjent, licznik)
+                except:
+                    print "nie udalo sie sparsowac danych!"
             except:
-              print "Nie udalo sie odebrac danych hl7"
-              socket.send('nie udalo sie odebrac danych hl7')
-              continue
-            sparsowane = 0
-            try:
-              sparsowane = hl7.parse(dane) #i to trzeba wrzucic do Mongo jeszcze
-              msh = hl7.segment('MSH', sparsowane) #w takiej postaci
-              pid = hl7.segment('PID', sparsowane) #ale na szczescie tylko te, ktore beda uzyteczne z punktu widzenia projektu
-              obr = hl7.segment('OBR', sparsowane)
-              obx = hl7.segment('OBX', sparsowane)
-              nk1 = hl7.segment('NK1', sparsowane)
-              pv1 = hl7.segment('PV1', sparsowane)
-              #i okolo 120 pozostalych...
-            except:
-              print "Nie udalo sie sparsowac danych"
-              socket.send('Nie udalo sie sparsowac danych. Sprawdz czy dane sa na pewno w standardzie hl7')
-              continue
-          
-#            if sparsowane !=0:
- #             try:
-  #              if n == 0:
-   #               pacjent[0]=sparsowane
-    #            else:
-     #             n = n+1
-      #            pacjent[n]=sparsowane
-       #       except:
-        #        print "Nie udalo sie zapisac danych pacjenta!"
-         #       continue'''
-            continue
+                print "cos poszlo nie tak, przy odbieraniu danych pacjenta"
         if co_robimy == 2:
             try:
-                try:
-                    socket.send(komunikat1)
-                    identyfikator = socket.recv(1024) #pobieramy identyfikator pacjenta
-                except:
-                    print "Nie udalo sie pobrac identyfikatora pacjenta"
-                    continue
-                try:
-                    socket.send('Wybrales pacjenta o identyfikatorze: ') 
-                    socket.send(identyfikator)
-                    if not pacjent[identyfikator] or pacjent[identyfikator] == None:
-                        print "Nieprawidlowy identyfikator, lub brak pacjenta w bazie! Sprawdz liste pacjentow."
-                    else:
-                        try:
-                            socket.send(pacjent[identyfikator])
-                            socket.send(komunikat2)
-                        except:
-                            print "Nie udalo sie wyslac danych pacjenta!"
-                except:
-                    print "Nie udalo sie dopasowac i wyslac danych pacjenta"
+                komunikat_wyslij_1 = "Podaj identyfikator pacjenta, ktorego dane chcesz otrzymac: "
+                wyslij_dane(socket, komunikat_wyslij_1)
+                pacjent = odbierz_dane(socket)
+                #db.pacjenci.find_one(licznik[pacjent])
+                #w tym miejscu bedze trzeba zrobic odczyt z bazy danych odpowiedniego pacjenta i wysylanie jego danych
             except:
-                print "Cos sie popsulo..."
-            continue
+                print "Cos sie popsulo - nie da sie odczytac danych pacjenta!"
         if co_robimy == 3:
-            try:
-                socket.send('Lista pacjentow: \n')
-                i = 0
-                while i < n:
-                    socket.send(pacjent[i])
-                    i = i+1
-            except:
-                print "Nie udalo sie wyslac listy pacjentow!"
+            komunikat_lista_1 = "Lista pacjentow: "
+            lista =  wypisz_z_bazy()
+            dane = komunikat_lista_1 + '\n' + lista + '\n' + menu
         else:
-            socket.send('Nieprawidlowe polecenie!\n')
-            #socket.send(menu)
-            continue
-        print ("otrzymalem dane\n")
-        
+            print "Klient podal zly identyfikator"
+            print co_robimy
+#------------------------------------------------------------------------------------------------------------------#    
+    
 if __name__ == '__main__': 
-  pool = Pool(5) # do not accept more than 5 connections
-  server = StreamServer(('127.0.0.1', 1234), obsluga, spawn=pool) # creates a new server
-  print 'Serwer ruszyl!'
-  server.serve_forever() # start accepting new connections
-
-
+    licznik = 0
+    # polaczenie baza danych
+    connection = Connection("localhost", 27017)
+    #Wybranie bazy danych pacjenci
+    db = connection.pacjenci
+    pool = Pool(5) # do not accept more than 5 connections
+    server = StreamServer(('127.0.0.1', 1234), obsluga, spawn=pool) # creates a new server
+    print 'Serwer ruszyl!'
+    server.serve_forever() # start accepting new connections

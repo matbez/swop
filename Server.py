@@ -66,13 +66,11 @@ def wypisz_z_bazy():
     lista=None
     i = 0
     while i <= j :
-        lista = cursor[i]
-        print lista
+        lista = cursor[i] #W planie bylo lista += ... ale to nie ma prawa bytu 
+        print lista #Tu sprawdzalem czy mi sie w ogole cos udalo wyciagnac z cursora
         i=i+1
-    print lista
-    
-    return(lista)
-    #db.pacjenci.find({"$oid":licznik[numer]}) - wyszukiwanie jednego pacjenta?
+    return(lista) 
+    #db.pacjenci.find({"$oid":licznik[numer]}) - wyszukiwanie jednego pacjenta? Śmieć! Niedokończony pomysł - raczej do wywalenia to będzie
     
 #-----------------------------------------------Wprowadzanie danych-----------------------------------------------#
 def wprowadz_dane():
@@ -131,7 +129,7 @@ def obsluga(socket, address):
             break
         if co_robimy == 1:
             try:
-                licznik = licznik + 1
+                #licznik = licznik + 1 #to w celu identyfikacji pacjentow w kolejnosci dodawania - chwilowe i nie skonczone rozwiazanie
                 komunikat_dodaj_1 = "Wprowadz dane pacjenta: "
                 wyslij_dane(socket, komunikat_dodaj_1)
                 pacjent = odbierz_dane(socket)

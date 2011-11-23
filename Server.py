@@ -57,7 +57,7 @@ def parsowanie(dane, licznik):
 #-----------------------------------------------Dodawanie do Bazy-------------------------------------------------#
 def dodaj_do_bazy(pacjent, liczik):
     dodaj  = db.pacjenci
-    identyfikator[licznik] = dodaj.put(pacjent)
+    identyfikator[licznik] = dodaj.insert(pacjent)
 
 #-----------------------------------------------Wypisywanie z Bazy------------------------------------------------#
 def wypisz_z_bazy():

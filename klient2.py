@@ -11,12 +11,12 @@ import _socket
 from gevent.socket import socket
 from gevent.socket import create_connection
 from gevent.ssl import SSLSocket
-
+#-------------------------------------------#
 HOST = '127.0.0.1'
 PORT = 1234
 address = (HOST, PORT)
 blad = None
-
+#-------------------------------------------#
 def wprowadz_dane():
     n='0'
     dane=raw_input() + '\r'
@@ -26,7 +26,7 @@ def wprowadz_dane():
             return(dane)
         else:
             dane+= n
-        
+#-------------------------------------------#
 def wyslij_dane(socket, dane):
     dlugosc=str(len(dane))
     socket.send(dlugosc)
@@ -36,7 +36,7 @@ def wyslij_dane(socket, dane):
         socket.send(dane)
     else:
         print "Mamy problem - serwer nie odpowiada na wiadomosc o dlugosci danych!"
-        
+#-------------------------------------------#
 def odbierz_dane(socket):
     rozmiar = int(socket.recv(1024))
     if rozmiar != 0:
@@ -46,12 +46,17 @@ def odbierz_dane(socket):
     else:
         socket.send("0")
         print "Problem z odbiorem danych!"
-
+#-------------------------------------------#
 def main():
     socket = None
     try:
+#        raw_socket = gevent.socket.socket()
+#        print repr(raw_socket)
+#        socket = gevent.ssl.SSLSocket(raw_socket, keyfile='klientkey.pem', certfile='server-request.csr', ssl_version=2)  
+#        socket.connect(address)
         socket = create_connection(address)
-        print 'Udalo sie polaczyc z:', HOST, 'do portu:', PORT
+        print socket
+        #print 'Udalo sie polaczyc z:', HOST, 'do portu:', PORT
     except _socket.error, blad:
         print 'wystapil blad:' 
         print blad 
@@ -65,6 +70,6 @@ def main():
         except:
             print "Polaczenie zostalo zerwane!"   
             break 
-    
+#-------------------------------------------#
 if __name__ == '__main__':
     sys.exit(main())

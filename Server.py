@@ -10,13 +10,11 @@ from gevent.server import StreamServer
 from gevent.pool import Pool
 import hl7
 from pymongo.connection import Connection
-from pymongo import ASCENDING
-import json
-
-#-------------------------------------------------Zmienne Globalne-----------------------------------------------#
+#from xml.dom.minidom import parse, parseString #do parsowania HL7 v3.x (czyli xml)
+#---------------------------------------------------Definicja menu-----------------------------------------------#
 menu = '''\n
     Dostepne opcje:\n
-    9 - Wyjscie\n
+    0 - Wyjscie\n
     1 - Dodaj dane pacjenta\n
     2 - Pobierz dane pacjenta\n
     3 - Pokaz liste pacjentow\n
@@ -24,12 +22,8 @@ menu = '''\n
     Zatwierdzenie danych do wyslania odbywa sie poprzez wyslanie pustej linii.
     
     Twoj wybor to: '''
-    
-identyfikator = []
-licznik = []
-
-#----------------------------------------------------Parsowanie--------------------------------------------------#
-def parsowanie(dane, licznik):
+#------------------------------------------------Parsowanie HL7 v2.x----------------------------------------------#
+def parsowanie(dane):
     sparsowane = hl7.parse(dane)
     msh = hl7.segment('MSH', sparsowane) #w takiej postaci
     pid = hl7.segment('PID', sparsowane) #ale na szczescie tylko te, ktore beda uzyteczne z punktu widzenia projektu
@@ -37,41 +31,59 @@ def parsowanie(dane, licznik):
     obx = hl7.segment('OBX', sparsowane)
     nk1 = hl7.segment('NK1', sparsowane)
     pv1 = hl7.segment('PV1', sparsowane)
+    al1 = hl7.segment('AL1', sparsowane)
+    dg1 = hl7.segment('DG1', sparsowane)
+    pr1 = hl7.segment('PR1', sparsowane)
+    evn = hl7.segment('EVN', sparsowane)
+    mpi = hl7.segment('MPI', sparsowane)
     #tu bedzie jeszcze 120 innych...
-    #a potem odwolanie do funkcji zapisujacej to do bazy danych
     
-    #wybiorcze sprawdzenie czy wszystko dziala:
-    print sparsowane
-    print
-    print nk1
-    print pid
-    
-    pacjent = {"MSH: ": msh, #tu beda tylko te pola, ktore przydadza sie z punktu widzenia projektu.
-               "PID: ": pid, #Ew. do bazy zostana wyslane juz tylko istotne dane wyciagniete z parsera
-               "OBR: ": obr, #pewnie okaze sie jak dostane i ogarne standardy
-               "OBX: ": obx,
+    pacjent = {"Imie: ": pid[5][1],
+               "Nazwisko: ": pid[5][0],       
+               "MSH: ": msh, #tu beda tylko te pola, ktore przydadza sie z punktu widzenia projektu.
+               "PID: ": pid, #Ew. do bazy zostana wyslane juz tylko istotne dane wyciagniete z parsera (jak imie i nazwisko wyzej)
+               "OBR: ": obr, 
+               "OBX: ": obx, #PROBLEM!! Niektore pola mogawystepowac >1 razy !!! Wtedy tracimy tu dane! (chociaz sie parsuja wczesniej)
                "NK1: ": nk1,
-               "PV1: ": pv1}
-    dodaj_do_bazy(pacjent, licznik)
-
+               "PV1: ": pv1,
+               "AL1: ": al1,
+               "DG1: ": dg1,
+               "PR1: ": pr1,
+               "EVN: ": evn,
+               "MPI: ": mpi }
+    
+    dodaj_do_bazy(pacjent)
+#-----------------------------------------------Parsowanie HL7 v 3.x ---------------------------------------------#
+#def parsowanie_v3(dane):
+#sparsowane = parseString(dane)
 #-----------------------------------------------Dodawanie do Bazy-------------------------------------------------#
-def dodaj_do_bazy(pacjent, liczik):
+def dodaj_do_bazy(pacjent):
     dodaj  = db.pacjenci
-    identyfikator[licznik] = dodaj.insert(pacjent)
-
+    _id = dodaj.insert(pacjent)
 #-----------------------------------------------Wypisywanie z Bazy------------------------------------------------#
 def wypisz_z_bazy():
-    cursor = db.pacjenci.find()
-    j=db.pacjenci.count()
-    lista=None
+    lista =''
     i = 0
-    while i <= j :
-        lista = cursor[i] #W planie bylo lista += ... ale to nie ma prawa bytu 
-        print lista #Tu sprawdzalem czy mi sie w ogole cos udalo wyciagnac z cursora
-        i=i+1
-    return(lista) 
-    #db.pacjenci.find({"$oid":licznik[numer]}) - wyszukiwanie jednego pacjenta? Śmieć! Niedokończony pomysł - raczej do wywalenia to będzie
-    
+    for item in db.pacjenci.find():
+        i = i+1
+        lista += str(i) + '. ' + item["Imie: "] + ' ' + item["Nazwisko: "] + '\n'
+    #print lista
+    return(lista)    
+#-----------------------------------------------Wyszukiwanie w Bazie----------------------------------------------#
+def szukaj_w_bazie(numer):
+    j=db.pacjenci.count() 
+    if numer <= j:
+            lista = 'Dane pacjenta: \n'
+            cursor = db.pacjenci.find()
+            i = 0
+            for item in db.pacjenci.find():
+                i = i+1
+                if numer == i:
+                    lista += str(i) + '. ' + item["Imie: "] + ' ' + item["Nazwisko: "] + '\n' 
+            lista += repr(cursor[numer-1])
+    else:
+        lista = 'Nieprawidłowy numer pacjenta! Sprawdz liste pacjentow.'
+    return(lista)    
 #-----------------------------------------------Wprowadzanie danych-----------------------------------------------#
 def wprowadz_dane():
     n='0'
@@ -109,14 +121,14 @@ def obsluga(socket, address):
     while True:
         try:
             wyslij_dane(socket, dane)
-            co_robimy = int(odbierz_dane(socket))
-            print co_robimy
+            dane = menu
+            co_robimy = odbierz_dane(socket)
         except:
             print "Nie udalo sie skomunikowac z klientem" 
         if not co_robimy:
             print ("klient zostal rozlaczony\n")
             break
-        if co_robimy == 9:
+        if co_robimy == "0\r":
             try:
                 komunikat_rozlacz = "Zakonczyles polaczenie z serwerem\n"
                 wyslij_dane(socket, komunikat_rozlacz)
@@ -127,43 +139,54 @@ def obsluga(socket, address):
                 wyslij_dane(socket, komunikat_rozlacz_err)
                 continue
             break
-        if co_robimy == 1:
+        if co_robimy == "1\r":
             try:
-                #licznik = licznik + 1 #to w celu identyfikacji pacjentow w kolejnosci dodawania - chwilowe i nie skonczone rozwiazanie
                 komunikat_dodaj_1 = "Wprowadz dane pacjenta: "
                 wyslij_dane(socket, komunikat_dodaj_1)
                 pacjent = odbierz_dane(socket)
-                try:
-                    parsowanie(pacjent, licznik)
-                except:
-                    print "nie udalo sie sparsowac danych!"
+                if pacjent[0:9] == 'MSH|^~\&|' : #w ten sposob mozna tez sprawdzic czy to HL7v2.x czy HL7v3.x i wybrac odpowiedni parser
+                    try:
+                        parsowanie(pacjent)
+                        dane = 'Dane pacjenta zapisane!' + menu
+                    except:
+                        print "nie udalo sie sparsowac danych!"
+                        dane = 'wystapil blad przy parsowaniu danych. Sprobuj jeszcze raz.' + menu
+                else:
+                    print "dane nie są w hl7!"
+                    dane = "Podane danie nie są zgodne ze standardem HL7! \n\n" + menu
             except:
                 print "cos poszlo nie tak, przy odbieraniu danych pacjenta"
-        if co_robimy == 2:
+        if co_robimy == "2\r":
             try:
                 komunikat_wyslij_1 = "Podaj identyfikator pacjenta, ktorego dane chcesz otrzymac: "
                 wyslij_dane(socket, komunikat_wyslij_1)
-                pacjent = odbierz_dane(socket)
-                #db.pacjenci.find_one(licznik[pacjent])
-                #w tym miejscu bedze trzeba zrobic odczyt z bazy danych odpowiedniego pacjenta i wysylanie jego danych
+                pacjent = int(odbierz_dane(socket))
+                dane_pacjenta = szukaj_w_bazie(pacjent)
+                dane = dane_pacjenta + '\n\n' + menu
             except:
                 print "Cos sie popsulo - nie da sie odczytac danych pacjenta!"
-        if co_robimy == 3:
-            komunikat_lista_1 = "Lista pacjentow: "
+        if co_robimy == "3\r":
+            komunikat_lista_1 = "Lista pacjentow: \n"
             lista =  wypisz_z_bazy()
             dane = komunikat_lista_1 + '\n' + lista + '\n' + menu
-        else:
-            print "Klient podal zly identyfikator"
-            print co_robimy
+        if dane == menu:
+            dane = "Nieprawidlowy wybor! Podaj jeszcze raz, co chcesz zrobic.\n\n" + menu
 #------------------------------------------------------------------------------------------------------------------#    
-    
 if __name__ == '__main__': 
-    licznik = 0
     # polaczenie baza danych
-    connection = Connection("localhost", 27017)
+    try:
+        connection = Connection("localhost", 27017)
+    except:
+        print 'Baza danych nie jest uruchomiona!'
+        exit(1)
     #Wybranie bazy danych pacjenci
     db = connection.pacjenci
-    pool = Pool(5) # do not accept more than 5 connections
-    server = StreamServer(('127.0.0.1', 1234), obsluga, spawn=pool) # creates a new server
-    print 'Serwer ruszyl!'
-    server.serve_forever() # start accepting new connections
+    print 'Polaczono sie z baza danych!'
+    pool = Pool(3) # do not accept more than 3 connections
+    try:
+        server = StreamServer(('127.0.0.1', 1234), obsluga, spawn=pool) #ograniczenie ilosci polaczen
+        print 'Serwer ruszyl!'
+        server.serve_forever() # start accepting new connections
+    except:
+        print "Nie udało się wystartować serwera!"
+        exit(2)
